@@ -2,6 +2,7 @@
 from pathlib import Path
 import sqlite3
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -31,11 +32,29 @@ ROLLING_SUMMARY_FILE = (
     PROJECT / "data/forecasts/rolling_summary.csv"
 )
 
+# Advanced forecasting outputs
+ADVANCED_BACKTEST_FILE = (
+    PROJECT / "data/forecasts/advanced_backtest.csv"
+)
+
+ADVANCED_SCORES_FILE = (
+    PROJECT / "data/forecasts/advanced_scores.csv"
+)
+
+ADVANCED_HORIZONS_FILE = (
+    PROJECT / "data/forecasts/advanced_horizons.csv"
+)
+
+ADVANCED_FORECAST_FILE = (
+    PROJECT / "data/forecasts/advanced_next_7_days.csv"
+)
+
 
 
 # -----------------------------------------
 # 2. Check the input files
 # -----------------------------------------
+
 
 
 for file_path in [
@@ -44,7 +63,12 @@ for file_path in [
     FORECAST_FILE,
     ROLLING_BACKTEST_FILE,
     ROLLING_SUMMARY_FILE,
+    ADVANCED_BACKTEST_FILE,
+    ADVANCED_SCORES_FILE,
+    ADVANCED_HORIZONS_FILE,
+    ADVANCED_FORECAST_FILE,
 ]:
+
 
     if not file_path.exists():
         st.error(f"Required file missing: {file_path}")
@@ -106,6 +130,33 @@ rolling_summary = pd.read_csv(
     ROLLING_SUMMARY_FILE
 )
 
+# Read all three-model evaluation outputs
+
+advanced_backtest = pd.read_csv(
+    ADVANCED_BACKTEST_FILE,
+    parse_dates=["origin_date", "target_date"],
+)
+
+advanced_scores = pd.read_csv(
+    ADVANCED_SCORES_FILE
+)
+
+advanced_horizons = pd.read_csv(
+    ADVANCED_HORIZONS_FILE
+)
+
+advanced_forecasts = pd.read_csv(
+    ADVANCED_FORECAST_FILE,
+    parse_dates=["forecast_date"],
+)
+
+advanced_scores = (
+    advanced_scores
+    .sort_values("mae")
+    .reset_index(drop=True)
+)
+
+
 
 
 if any(
@@ -116,8 +167,13 @@ if any(
         forecasts,
         rolling_details,
         rolling_summary,
+        advanced_backtest,
+        advanced_scores,
+        advanced_horizons,
+        advanced_forecasts,
     ]
 ):
+
 
     st.error("One or more datasets are empty.")
     st.stop()
@@ -221,13 +277,16 @@ st.sidebar.write(f"Forecasted days: {len(forecasts)}")
 # -----------------------------------------
 
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Overview",
     "Forecasts",
     "Backtesting",
     "Data Explorer",
     "7-Day Evaluation",
+    "Advanced Forecasting",
 ])
+
 
 
 
@@ -585,6 +644,277 @@ with tab5:
         data=ROLLING_BACKTEST_FILE.read_bytes(),
         file_name="signalbench_rolling_backtest.csv",
         mime="text/csv",
+    )
+
+# -----------------------------------------
+# TAB 6: Advanced Forecasting
+# -----------------------------------------
+
+with tab6:
+
+    st.header("Advanced Forecasting Intelligence")
+
+    st.caption(
+        "Three forecasting methods evaluated across "
+        "seven future horizons using rolling-origin "
+        "historical backtesting."
+    )
+
+    # -------------------------------------
+    # 1. Identify the winning model
+    # -------------------------------------
+
+    advanced_winner = advanced_scores.iloc[0]["model"]
+    winner_mae = advanced_scores.iloc[0]["mae"]
+    winner_mape = advanced_scores.iloc[0]["mape"]
+
+    forecast_models = advanced_forecasts["model"].unique()
+
+    if (
+        len(forecast_models) != 1
+        or forecast_models[0] != advanced_winner
+    ):
+        st.error(
+            "Forecast files and model evaluation do not "
+            "agree. Rerun advanced_forecast.py."
+        )
+        st.stop()
+
+    # -------------------------------------
+    # 2. Display summary metrics
+    # -------------------------------------
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Winning model",
+        advanced_winner.replace("_", " ").title(),
+    )
+
+    c2.metric(
+        "Seven-day MAE",
+        f"{winner_mae:,.0f}",
+    )
+
+    c3.metric(
+        "Seven-day MAPE",
+        f"{winner_mape:.2f}%",
+    )
+
+    c4.metric(
+        "Forecast days",
+        str(len(advanced_forecasts)),
+    )
+
+    st.info(
+        "All workload records are synthetic. "
+        "Accuracy statistics describe historical "
+        "backtests, not guaranteed future performance."
+    )
+
+    st.divider()
+
+    # -------------------------------------
+    # 3. Compare all three models
+    # -------------------------------------
+
+    st.subheader("Three-Model Performance")
+
+    st.write(
+        "The best model is selected using the lowest "
+        "overall seven-day Mean Absolute Error."
+    )
+
+    display_scores = advanced_scores[
+        ["model", "evaluations", "mae", "mape"]
+    ].copy()
+
+    display_scores.columns = [
+        "Model",
+        "Comparisons",
+        "MAE (records)",
+        "MAPE (%)",
+    ]
+
+    st.dataframe(
+        display_scores.round(2),
+        hide_index=True,
+    )
+
+    st.subheader("Forecast error by model")
+
+    st.bar_chart(
+        advanced_scores,
+        x="model",
+        y="mae",
+        horizontal=True,
+    )
+
+    st.caption(
+        "Lower MAE indicates smaller historical "
+        "forecasting errors."
+    )
+
+    # -------------------------------------
+    # 4. Compare errors by horizon
+    # -------------------------------------
+
+    st.divider()
+    st.subheader("Accuracy Across Seven Days")
+
+    horizon_comparison = (
+        advanced_horizons
+        .pivot(
+            index="horizon",
+            columns="model",
+            values="mae",
+        )
+        .reset_index()
+    )
+
+    st.line_chart(
+        horizon_comparison,
+        x="horizon",
+        y=[
+            "previous_day",
+            "previous_week",
+            "weekday_median",
+        ],
+    )
+
+    st.caption(
+        "The chart shows how prediction error changes "
+        "from one day ahead to seven days ahead."
+    )
+
+    # -------------------------------------
+    # 5. Forecast chart with error bands
+    # -------------------------------------
+
+    st.divider()
+    st.subheader("Forecast With Historical Error Bands")
+
+    # Shaded lower-to-upper range
+    uncertainty_area = (
+        alt.Chart(advanced_forecasts)
+        .mark_area(
+            color="#277E87",
+            opacity=0.18,
+        )
+        .encode(
+            x=alt.X(
+                "forecast_date:T",
+                title="Forecast date",
+            ),
+            y=alt.Y(
+                "lower_bound:Q",
+                title="Records processed",
+                scale=alt.Scale(zero=False),
+            ),
+            y2="upper_bound:Q",
+        )
+    )
+
+    # Central forecast line
+    forecast_line = (
+        alt.Chart(advanced_forecasts)
+        .mark_line(
+            color="#277E87",
+            strokeWidth=3,
+            point=True,
+        )
+        .encode(
+            x=alt.X(
+                "forecast_date:T",
+                title="Forecast date",
+            ),
+            y=alt.Y(
+                "predicted_records:Q",
+                title="Records processed",
+            ),
+            tooltip=[
+                alt.Tooltip(
+                    "forecast_date:T",
+                    title="Date",
+                ),
+                alt.Tooltip(
+                    "predicted_records:Q",
+                    title="Prediction",
+                    format=",.0f",
+                ),
+                alt.Tooltip(
+                    "lower_bound:Q",
+                    title="Lower estimate",
+                    format=",.0f",
+                ),
+                alt.Tooltip(
+                    "upper_bound:Q",
+                    title="Upper estimate",
+                    format=",.0f",
+                ),
+            ],
+        )
+    )
+
+    combined_chart = (
+        uncertainty_area + forecast_line
+    ).properties(height=360)
+
+    st.altair_chart(
+        combined_chart,
+        width="stretch",
+    )
+
+    st.caption(
+        "Shaded regions use the historical 90th "
+        "percentile of absolute errors at each horizon. "
+        "These are exploratory error bands, not "
+        "validated 90% prediction intervals."
+    )
+
+    # -------------------------------------
+    # 6. Display detailed forecast values
+    # -------------------------------------
+
+    st.subheader("Seven-Day Forecast Details")
+
+    st.dataframe(
+        advanced_forecasts,
+        hide_index=True,
+    )
+
+    st.download_button(
+        "Download advanced seven-day forecast",
+        data=ADVANCED_FORECAST_FILE.read_bytes(),
+        file_name="signalbench_advanced_forecast.csv",
+        mime="text/csv",
+    )
+
+    # -------------------------------------
+    # 7. Evaluation information
+    # -------------------------------------
+
+    st.divider()
+
+    st.subheader("Evaluation Methodology")
+
+    origins = advanced_backtest[
+        "origin_date"
+    ].nunique()
+
+    st.write(f"Historical starting points: {origins}")
+    st.write(
+        f"Total prediction comparisons: "
+        f"{len(advanced_backtest)}"
+    )
+    st.write("Forecast horizon: seven days")
+    st.write("Model selection metric: overall MAE")
+
+    st.caption(
+        "Rolling backtest windows overlap. "
+        "Model selection and error-band estimation "
+        "use the same synthetic historical dataset. "
+        "Independent coverage validation remains pending."
     )
 
 # -----------------------------------------
