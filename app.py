@@ -23,12 +23,29 @@ DB_FILE = PROJECT / "data/database/signalbench.db"
 BACKTEST_FILE = PROJECT / "data/forecasts/backtest_results.csv"
 FORECAST_FILE = PROJECT / "data/forecasts/next_7_days.csv"
 
+ROLLING_BACKTEST_FILE = (
+    PROJECT / "data/forecasts/rolling_backtest.csv"
+)
+
+ROLLING_SUMMARY_FILE = (
+    PROJECT / "data/forecasts/rolling_summary.csv"
+)
+
+
 
 # -----------------------------------------
 # 2. Check the input files
 # -----------------------------------------
 
-for file_path in [DB_FILE, BACKTEST_FILE, FORECAST_FILE]:
+
+for file_path in [
+    DB_FILE,
+    BACKTEST_FILE,
+    FORECAST_FILE,
+    ROLLING_BACKTEST_FILE,
+    ROLLING_SUMMARY_FILE,
+]:
+
     if not file_path.exists():
         st.error(f"Required file missing: {file_path}")
         st.stop()
@@ -77,7 +94,31 @@ forecasts = pd.read_csv(
     parse_dates=["forecast_date"],
 )
 
-if historical.empty or backtest.empty or forecasts.empty:
+
+# Read seven-day rolling backtesting results
+
+rolling_details = pd.read_csv(
+    ROLLING_BACKTEST_FILE,
+    parse_dates=["origin_date", "target_date"],
+)
+
+rolling_summary = pd.read_csv(
+    ROLLING_SUMMARY_FILE
+)
+
+
+
+if any(
+    dataset.empty
+    for dataset in [
+        historical,
+        backtest,
+        forecasts,
+        rolling_details,
+        rolling_summary,
+    ]
+):
+
     st.error("One or more datasets are empty.")
     st.stop()
 
@@ -179,12 +220,15 @@ st.sidebar.write(f"Forecasted days: {len(forecasts)}")
 # 8. Main dashboard tabs
 # -----------------------------------------
 
-tab1, tab2, tab3, tab4 = st.tabs([
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Overview",
     "Forecasts",
     "Backtesting",
     "Data Explorer",
+    "7-Day Evaluation",
 ])
+
 
 
 # -----------------------------------------
@@ -364,6 +408,184 @@ with tab4:
         mime="text/csv",
     )
 
+
+# -----------------------------------------
+# TAB 5: Seven-day forecasting evaluation
+# -----------------------------------------
+
+with tab5:
+
+    st.header("Seven-Day Forecast Evaluation")
+
+    st.caption(
+        "Rolling-origin backtesting across historical "
+        "starting points. Each model predicts seven days "
+        "without seeing future actual values."
+    )
+
+    # Calculate overall model accuracy
+    overall = (
+        rolling_details
+        .groupby("model", as_index=False)
+        .agg(
+            comparisons=("absolute_error", "size"),
+            mae=("absolute_error", "mean"),
+            mape=("absolute_percentage_error", "mean"),
+        )
+        .sort_values("mae")
+        .reset_index(drop=True)
+    )
+
+    rolling_winner = overall.iloc[0]["model"]
+    rolling_mae = overall.iloc[0]["mae"]
+    rolling_mape = overall.iloc[0]["mape"]
+
+    origin_count = rolling_details["origin_date"].nunique()
+
+    # Summary cards
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Rolling starting points",
+        f"{origin_count}",
+    )
+
+    c2.metric(
+        "Best seven-day model",
+        rolling_winner.replace("_", " ").title(),
+    )
+
+    c3.metric(
+        "Seven-day MAE",
+        f"{rolling_mae:,.0f}",
+    )
+
+    c4.metric(
+        "Seven-day MAPE",
+        f"{rolling_mape:.2f}%",
+    )
+
+    st.divider()
+
+    # Compare overall model accuracy
+    st.subheader("Overall model comparison")
+
+    st.dataframe(
+        overall.round(2),
+        hide_index=True,
+    )
+
+    if rolling_winner != reported_model:
+        st.warning(
+            "The seven-day evaluation selected a different "
+            "model from the current forecast generator. "
+            "Existing future predictions have not changed."
+        )
+    else:
+        st.success(
+            "The seven-day evaluation and existing "
+            "forecast generator selected the same model."
+        )
+
+    # Display error by forecast horizon
+    st.subheader("Prediction error by days ahead")
+
+    mae_chart = (
+        rolling_summary
+        .pivot(
+            index="horizon",
+            columns="model",
+            values="mae",
+        )
+        .reset_index()
+    )
+
+    st.line_chart(
+        mae_chart,
+        x="horizon",
+        y=["previous_day", "previous_week"],
+    )
+
+    st.caption(
+        "Day 1 measures tomorrow's forecast. "
+        "Day 7 measures the seventh day ahead. "
+        "Lower MAE indicates better historical accuracy."
+    )
+
+    # Show the percentage error as well
+    st.subheader("Percentage error by forecast horizon")
+
+    mape_chart = (
+        rolling_summary
+        .pivot(
+            index="horizon",
+            columns="model",
+            values="mape",
+        )
+        .reset_index()
+    )
+
+    st.line_chart(
+        mape_chart,
+        x="horizon",
+        y=["previous_day", "previous_week"],
+    )
+
+    # Interactive historical forecast explorer
+    st.divider()
+    st.subheader("Explore a historical forecast")
+
+    selected_model = st.selectbox(
+        "Choose a forecasting model",
+        ["previous_day", "previous_week"],
+        key="rolling_model",
+    )
+
+    available_origins = sorted(
+        rolling_details["origin_date"].dt.date.unique(),
+        reverse=True,
+    )
+
+    selected_origin = st.selectbox(
+        "Choose a historical forecast starting date",
+        available_origins,
+        key="rolling_origin",
+    )
+
+    selected_rows = rolling_details.loc[
+        (rolling_details["model"] == selected_model)
+        & (
+            rolling_details["origin_date"].dt.date
+            == selected_origin
+        )
+    ].sort_values("horizon")
+
+    st.line_chart(
+        selected_rows,
+        x="target_date",
+        y=["actual_records", "predicted_records"],
+    )
+
+    st.caption(
+        "Compare the seven predictions made at the "
+        "selected historical starting point with "
+        "what actually happened."
+    )
+
+    st.dataframe(
+        selected_rows,
+        hide_index=True,
+    )
+
+    # Download full evaluation results
+    st.divider()
+
+    st.download_button(
+        "Download seven-day backtesting results",
+        data=ROLLING_BACKTEST_FILE.read_bytes(),
+        file_name="signalbench_rolling_backtest.csv",
+        mime="text/csv",
+    )
 
 # -----------------------------------------
 # 9. Footer
