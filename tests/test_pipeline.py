@@ -99,31 +99,52 @@ class SignalBenchTests(unittest.TestCase):
                 self.actual[day - timedelta(days=7)]
             )
 
-    # TEST 5: Lowest-error model is selected
+    
+    # TEST 5: Selection uses seven-day accuracy
     def test_model_selection(self):
-        columns = {
-            "previous_day": "predicted_previous_day",
-            "previous_week": "predicted_previous_week"
-        }
+        rolling = read_csv(
+            PROJECT / "data/forecasts/rolling_backtest.csv"
+        )
 
-        scores = {}
+        models = ("previous_day", "previous_week")
 
-        for model, column in columns.items():
-            errors = [
-                abs(
-                    int(row["actual_records"])
-                    - int(row[column])
-                )
-                for row in self.backtest
+        expected_per_model = (
+            len(self.raw) - 28 - 7 + 1
+        ) * 7
+
+        self.assertEqual(
+            len(rolling),
+            expected_per_model * len(models)
+        )
+
+        model_scores = {}
+
+        for model in models:
+            selected = [
+                row for row in rolling
+                if row["model"] == model
             ]
 
-            scores[model] = sum(errors) / len(errors)
+            self.assertEqual(
+                len(selected),
+                expected_per_model
+            )
 
-        expected_winner = min(scores, key=scores.get)
+            model_scores[model] = sum(
+                float(row["absolute_error"])
+                for row in selected
+            ) / len(selected)
 
-        selected_model = self.forecasts[0]["model"]
+        expected_winner = min(
+            models,
+            key=lambda name: model_scores[name]
+        )
 
-        self.assertEqual(selected_model, expected_winner)
+        self.assertEqual(
+            self.forecasts[0]["model"],
+            expected_winner
+        )
+
 
     # TEST 6: Future forecasts are consistent
     def test_future_forecasts(self):
@@ -159,6 +180,45 @@ class SignalBenchTests(unittest.TestCase):
 
             history.append(expected_prediction)
 
+
+    # TEST 7: Rolling forecasts do not use future actuals
+    def test_rolling_forecast_logic(self):
+        rolling = read_csv(
+            PROJECT / "data/forecasts/rolling_backtest.csv"
+        )
+
+        for row in rolling:
+            origin = date.fromisoformat(row["origin_date"])
+            target = date.fromisoformat(row["target_date"])
+            horizon = int(row["horizon"])
+
+            self.assertIn(horizon, range(1, 8))
+            self.assertEqual(
+                target,
+                origin + timedelta(days=horizon)
+            )
+
+            actual = self.actual[target]
+            self.assertEqual(
+                int(row["actual_records"]),
+                actual
+            )
+
+            if row["model"] == "previous_day":
+                expected = self.actual[origin]
+
+            elif row["model"] == "previous_week":
+                expected = self.actual[
+                    target - timedelta(days=7)
+                ]
+
+            else:
+                self.fail("Unknown model")
+
+            self.assertEqual(
+                int(row["predicted_records"]),
+                expected
+            )
 
 if __name__ == "__main__":
     unittest.main()

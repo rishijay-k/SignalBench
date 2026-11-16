@@ -95,28 +95,38 @@ Open the local URL displayed by Streamlit.
 
 ## Model Evaluation
 
-The forecasting engine evaluates two baseline methods:
 
-1. Previous-day prediction
-2. Previous-week prediction
+## Model Evaluation
 
-It uses the final 14 historical observations to compare
-one-step-ahead forecasting accuracy.
+SignalBench compares two forecasting baselines:
+
+1. Previous-day forecast
+2. Previous-week forecast
+
+The original 14-day backtest measures one-day-ahead accuracy.
+
+The rolling evaluation tests both models over seven
+forecast horizons at 22 historical starting points.
+
+The evaluation produces 308 prediction comparisons.
+
+The model with the lowest overall seven-day MAE is
+automatically selected for future forecasting.
 
 Metrics:
-- MAE: Mean Absolute Error
+- MAE: Mean Absolute Error, measured in records
 - MAPE: Mean Absolute Percentage Error
 
-The model with the lowest MAE is used to generate a
-seven-day forecast.
+The evaluation uses synthetic data and overlapping
+historical windows. Results do not establish accuracy
+on independent production data.
+
 
 ## Limitations
 
 - All historical workload data is synthetic.
 - Results are not evidence of real production performance.
 - The initial backtest measures one-step-ahead predictions.
-- Seven-day forecast accuracy has not yet been independently
-  evaluated with a multi-horizon backtest.
 - The system currently runs locally, not on cloud infrastructure.
 
 ## Future Development

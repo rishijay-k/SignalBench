@@ -4,6 +4,11 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
+import subprocess
+import sys
+from statistics import mean
+
+
 # -----------------------------------
 # STEP 1: Locate the project database
 # -----------------------------------
@@ -116,11 +121,73 @@ for model_name, column in model_columns.items():
         "mape": mape,
     }
 
-# Choose the model with the lowest MAE
-winning_model = min(
-    scores,
-    key=lambda name: scores[name]["mae"]
+
+# -----------------------------------
+# Select model using SEVEN-DAY accuracy
+# -----------------------------------
+
+print("\nRunning seven-day model evaluation...")
+
+# Always refresh evaluation using the current database.
+# This prevents selecting a model from an old CSV file.
+subprocess.run(
+    [
+        sys.executable,
+        str(PROJECT / "src" / "rolling_backtest.py"),
+    ],
+    check=True,
 )
+
+rolling_file = OUTPUT_DIR / "rolling_backtest.csv"
+
+with rolling_file.open(
+    "r", encoding="utf-8", newline=""
+) as file:
+    rolling_results = list(csv.DictReader(file))
+
+model_names = ("previous_day", "previous_week")
+
+# Expected comparisons for the current dataset
+expected_origins = len(values) - 28 - 7 + 1
+expected_per_model = expected_origins * 7
+
+if expected_origins <= 0:
+    raise SystemExit("Insufficient data for model selection.")
+
+if len(rolling_results) != expected_per_model * 2:
+    raise SystemExit("Incomplete rolling evaluation results.")
+
+seven_day_scores = {}
+
+for model_name in model_names:
+
+    model_rows = [
+        row for row in rolling_results
+        if row["model"] == model_name
+    ]
+
+    if len(model_rows) != expected_per_model:
+        raise SystemExit(
+            f"Incomplete evaluation for {model_name}"
+        )
+
+    seven_day_scores[model_name] = {
+        "mae": mean(
+            float(row["absolute_error"])
+            for row in model_rows
+        ),
+        "mape": mean(
+            float(row["absolute_percentage_error"])
+            for row in model_rows
+        ),
+    }
+
+# Choose the lowest MAE across all seven horizons
+winning_model = min(
+    model_names,
+    key=lambda name: seven_day_scores[name]["mae"],
+)
+
 
 # -----------------------------------
 # STEP 6: Predict the next seven days
@@ -195,14 +262,24 @@ print("------------------------------")
 print(f"Historical records: {len(values)}")
 print(f"Backtest days: {test_days}")
 
-print("\nMODEL COMPARISON")
+print("\nONE-DAY MODEL COMPARISON (REFERENCE ONLY)")
 
 for model_name, metrics in scores.items():
     print(f"\nModel: {model_name}")
     print(f"MAE: {metrics['mae']:,.0f} records")
     print(f"MAPE: {metrics['mape']:.2f}%")
 
-print(f"\nSelected model: {winning_model}")
+
+print("\nSEVEN-DAY MODEL COMPARISON")
+
+for model_name, metrics in seven_day_scores.items():
+    print(f"\nModel: {model_name}")
+    print(f"MAE: {metrics['mae']:,.2f} records")
+    print(f"MAPE: {metrics['mape']:.2f}%")
+
+print(f"\nAutomatically selected model: {winning_model}")
+print("Selection criterion: lowest seven-day MAE")
+
 
 print("\nNEXT SEVEN DAYS")
 
