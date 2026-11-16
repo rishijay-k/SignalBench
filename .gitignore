@@ -1,0 +1,31 @@
+
+# Python virtual environment
+.venv/
+
+# Python temporary files
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS files
+.DS_Store
+
+# Editor settings
+.vscode/
+.idea/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Generated demonstration data
+data/raw/*.csv
+data/database/*.db
+data/database/*.db-*
+data/forecasts/*.csv
+
+# Test and analysis caches
+.pytest_cache/
+.coverage
