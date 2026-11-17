@@ -33,3 +33,4 @@ data/forecasts/*.csv
 
 # Local pipeline execution logs
 logs/
+backups/

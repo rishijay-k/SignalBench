@@ -4,6 +4,8 @@ import json
 import subprocess
 import sys
 import time
+import sqlite3
+from contextlib import closing
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -84,22 +86,27 @@ def save_latest(summary):
     temporary_file.replace(LATEST_FILE)
 
 
+
 def latest_source_date():
-    csv_path = PROJECT / "data/raw/workload.csv"
+    db_path = (
+        PROJECT / "data/database/signalbench.db"
+    )
+
+    if not db_path.is_file():
+        return None
 
     try:
-        with csv_path.open(
-            "r", encoding="utf-8", newline=""
-        ) as file:
-            rows = list(csv.DictReader(file))
+        with closing(sqlite3.connect(db_path)) as connection:
+            row = connection.execute("""
+                SELECT MAX(workload_date)
+                FROM daily_workloads
+            """).fetchone()
 
-        return max(
-            date.fromisoformat(row["date"])
-            for row in rows
-        ).isoformat()
+        return row[0] if row and row[0] else None
 
-    except (OSError, ValueError, KeyError):
+    except (sqlite3.Error, OSError):
         return None
+
 
 
 # ---------------------------------------
