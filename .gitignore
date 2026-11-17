@@ -34,3 +34,19 @@ data/forecasts/*.csv
 # Local pipeline execution logs
 logs/
 backups/
+
+
+# SignalBench local files
+/.agents/
+/app_backup_step11.py
+/data/
+/backups/
+/logs/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
